@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 from langchain_core.exceptions import OutputParserException
+from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -1452,3 +1453,53 @@ def test_pydantic_tools_parser_unknown_tool_raises_output_parser_exception(
     msg = str(excinfo.value)
     assert "Unknown tool type" in msg
     assert "UnknownTool" in msg
+
+
+class _Person(BaseModel):
+    name: str
+    age: int
+
+
+def _tool_call_message() -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "_Person", "args": {"name": "Ada", "age": 36}, "id": "call_1"}
+        ],
+    )
+
+
+def test_tools_parser_stream_non_streaming_model() -> None:
+    # A model without _stream makes stream() fall back to invoke() and yield a
+    # full AIMessage, whose tool calls must reach the parser.
+    model = FakeMessagesListChatModel(responses=[_tool_call_message()] * 2)
+    chain = model | PydanticToolsParser(tools=[_Person], first_tool_only=True)
+
+    assert list(chain.stream("hi")) == [_Person(name="Ada", age=36)]
+    assert list(chain.stream("hi")) == [chain.invoke("hi")]
+
+
+async def test_tools_parser_astream_non_streaming_model() -> None:
+    model = FakeMessagesListChatModel(responses=[_tool_call_message()])
+    chain = model | JsonOutputToolsParser()
+
+    chunks = [chunk async for chunk in chain.astream("hi")]
+
+    assert chunks == [[{"args": {"name": "Ada", "age": 36}, "type": "_Person"}]]
+
+
+def test_tools_parser_transform_full_ai_message() -> None:
+    chunks = list(JsonOutputToolsParser().transform(iter([_tool_call_message()])))
+
+    assert chunks == [[{"args": {"name": "Ada", "age": 36}, "type": "_Person"}]]
+
+
+def test_transform_message_without_chunk_class() -> None:
+    class CustomMessage(BaseMessage):
+        type: str = "custom"
+
+    chunks = list(
+        JsonOutputToolsParser().transform(iter([CustomMessage(content="hi")]))
+    )
+
+    assert chunks == [[]]

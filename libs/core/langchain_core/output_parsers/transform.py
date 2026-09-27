@@ -10,6 +10,7 @@ from typing import (
 from typing_extensions import override
 
 from langchain_core.messages import BaseMessage, BaseMessageChunk
+from langchain_core.messages.utils import _msg_to_chunk
 from langchain_core.output_parsers.base import BaseOutputParser, T
 from langchain_core.outputs import (
     ChatGeneration,
@@ -23,6 +24,15 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
     from langchain_core.runnables import RunnableConfig
+
+
+def _message_to_chunk(message: BaseMessage) -> BaseMessageChunk:
+    # Keep the message's own chunk type (AIMessage -> AIMessageChunk) so fields
+    # like tool_calls survive. Fall back for message types without a chunk class.
+    try:
+        return _msg_to_chunk(message)
+    except ValueError:
+        return BaseMessageChunk(**message.model_dump())
 
 
 class BaseTransformOutputParser(BaseOutputParser[T]):
@@ -131,9 +141,7 @@ class BaseCumulativeTransformOutputParser(BaseTransformOutputParser[T]):
             if isinstance(chunk, BaseMessageChunk):
                 chunk_gen = ChatGenerationChunk(message=chunk)
             elif isinstance(chunk, BaseMessage):
-                chunk_gen = ChatGenerationChunk(
-                    message=BaseMessageChunk(**chunk.model_dump())
-                )
+                chunk_gen = ChatGenerationChunk(message=_message_to_chunk(chunk))
             else:
                 chunk_gen = GenerationChunk(text=chunk)
 
@@ -158,9 +166,7 @@ class BaseCumulativeTransformOutputParser(BaseTransformOutputParser[T]):
             if isinstance(chunk, BaseMessageChunk):
                 chunk_gen = ChatGenerationChunk(message=chunk)
             elif isinstance(chunk, BaseMessage):
-                chunk_gen = ChatGenerationChunk(
-                    message=BaseMessageChunk(**chunk.model_dump())
-                )
+                chunk_gen = ChatGenerationChunk(message=_message_to_chunk(chunk))
             else:
                 chunk_gen = GenerationChunk(text=chunk)
 
